@@ -3,6 +3,6 @@ maintainer:
     name: "Andrea F. Daniele"
     email: "afdaniele@duckietown.com"
 description: "Key-Value Store powered by DTPS for Duckietown robots"
-version: 0.1.0
+version: 0.2.0
 # pick an icon from: https://fontawesome.com/v4.7.0/icons/
 icon: square
