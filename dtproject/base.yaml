@@ -1,4 +1,4 @@
 #registry: docker.io
 #organization: duckietown
-tag: v5.0.0
+tag: v5.0.0-${ARCH}
 repository: dt-commons
