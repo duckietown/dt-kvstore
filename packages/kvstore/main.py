@@ -15,6 +15,8 @@ from dtps_http import TopicProperties, RawData, TransformError
 
 import logging
 
+from .udp_responder import UDPResponder
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 if "DEBUG" in os.environ and os.environ["DEBUG"].lower() in ["1", "yes", "true"]:
@@ -23,8 +25,8 @@ if "DEBUG" in os.environ and os.environ["DEBUG"].lower() in ["1", "yes", "true"]
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 11411
 
-# UDP_RESPONDER_HOST = "0.0.0.0"
-# UDP_RESPONDER_PORT = 11411
+UDP_RESPONDER_HOST = "0.0.0.0"
+UDP_RESPONDER_PORT = 11411
 
 ROBOT_NAME: str = get_robot_name()
 EXAMPLE_CREATE_PAYLOAD = {"key": "/example/key/", "value": ["duckietown", "is", "cool"], "persist": False}
@@ -215,17 +217,6 @@ ADAPTED_FILES = {
 }
 
 
-# class UDPResponder(asyncio.DatagramProtocol):
-#
-#     def connection_made(self, transport):
-#         super().connection_made(transport)
-#         print(f"Connection made: {transport}")
-#
-#     def datagram_received(self, data, addr):
-#         # Here is where you would push message to whatever methods/classes you want.
-#         print(f"Received datagram: {data}")
-
-
 class KVStore:
 
     def __init__(self, args: argparse.Namespace):
@@ -387,10 +378,7 @@ class KVStore:
         await self._cxt.navigate("dtps/topic_list").subscribe(self._on_topics_change)
         # start UDP responder
         loop = asyncio.get_event_loop()
-        await loop.create_datagram_endpoint(
-            UDPResponder,
-            local_addr=(UDP_RESPONDER_HOST, UDP_RESPONDER_PORT)
-        )
+        await UDPResponder.create(loop, UDP_RESPONDER_HOST, UDP_RESPONDER_PORT)
         # keep running
         try:
             while True:
