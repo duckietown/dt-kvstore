@@ -363,7 +363,7 @@ class KVStore:
                 )
                 adapter.set_content_quietly(value)
                 self._adapters[object_path] = adapter
-                logger.info(f"Creating new queue for '{object_path}'")
+                logger.info(f"Creating new queue for '{object_path}' with configuration: {app_data}")
                 # NOTE: it is important that we add the adapter to the dict before creating the queue
                 await adapter.init(self._cxt)
         # process removed topics
