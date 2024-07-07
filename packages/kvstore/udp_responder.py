@@ -8,14 +8,12 @@ import traceback
 from asyncio import DatagramTransport
 from typing import Tuple
 
-from dt_cli_utils import install_colored_logs
 from dt_robot_utils import get_robot_name, get_robot_type, get_robot_configuration, get_robot_hardware
 
 logger = logging.getLogger("udp-responder")
 logger.setLevel(logging.INFO)
 if "DEBUG" in os.environ and os.environ["DEBUG"].lower() in ["1", "yes", "true"]:
     logger.setLevel(logging.DEBUG)
-install_colored_logs(logger)
 
 IPAddress = str
 Port = int
