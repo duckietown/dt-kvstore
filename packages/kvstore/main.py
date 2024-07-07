@@ -9,6 +9,7 @@ from typing import Optional, Dict, Type, Union, Set, List, cast, Any
 
 import yaml
 
+from dt_cli_utils import install_colored_logs
 from dt_robot_utils import get_robot_name
 from dtps import context, DTPSContext, SubscriptionInterface
 from dtps_http import TopicProperties, RawData, TransformError
@@ -21,6 +22,11 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 if "DEBUG" in os.environ and os.environ["DEBUG"].lower() in ["1", "yes", "true"]:
     logger.setLevel(logging.DEBUG)
+
+# install colored logs on all loggers and set the default level to INFO
+install_colored_logs(level=logging.INFO)
+# install colored logs on our logger with our custom level
+install_colored_logs(logger=logger)
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 11411
@@ -333,13 +339,18 @@ class KVStore:
 
             # create new adapter if we don't have one
             if object_path not in self._adapters:
-                # TODO: once DTSW-5915 is fixed, we fetch the meta dict as the queue's metadata (aka, app_data)
-                meta: dict = {}
-                # TODO: once DTSW-5915 is fixed, we fetch the meta dict as the queue's metadata (aka, app_data)
-
+                try:
+                    cxt = self._cxt.navigate(object_path).meta()
+                    rd: RawData = await cxt.data_get()
+                except Exception as e:
+                    logger.error(f"Error fetching metadata for '{object_path}': {e}")
+                    continue
+                # get metadata
+                meta = cast(dict, rd.get_as_native_object())
+                app_data = meta.get("topics", {}).get("", {}).get("app_data", {})
                 # args
-                persist: bool = meta.get("kvstore.persist", False)
-                value: Any = meta.get("kvstore.initial", None)
+                persist: bool = app_data.get("kvstore.persist", False)
+                value: Any = app_data.get("kvstore.initial", None)
                 # create adapter
                 adapter = YAMLFileAdapter(
                     file_path=fpath,
