@@ -49,6 +49,7 @@ class FileAdapterTemplate:
     object_path: str
     kind: Type["GenericFileAdapter"]
     droppable: bool
+    default: Dict[str, object] = NOTSET
     properties: Optional[TopicProperties] = AUTO
 
 
@@ -60,44 +61,65 @@ class GenericFileAdapter:
     persist: bool
     droppable: bool
     create: bool = False
+    default: Optional[object] = NOTSET
     initial: Optional[object] = NOTSET
 
-    _content: Optional[bytes] = AUTO
+    _content: Union[bytes, NOTSET] = AUTO
     _context: DTPSContext = None
     _subscriber: SubscriptionInterface = None
+    _initialized: bool = False
     
     def __post_init__(self):
         if not os.path.exists(self.file_path):
             if not self.create:
                 raise FileNotFoundError(f"File not found: {self.file_path}")
-            # make sure we received data
-            if self.initial is NOTSET:
-                raise ValueError("When creating a new file, 'initial' must be provided")
             # create the directory
             os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
-            # create the file
-            self._content = self.raw_from_native_object(self.initial)
-            self.write_to_disk()
-        # read the content from disk
-        self.read_from_disk()
-        # format the content
-        self._content = self.raw_from_native_object(self.to_native_object())
+            # create the file only if we have initial data
+            if self.initial is not NOTSET:
+                # create the file
+                self._content = self.raw_from_native_object(self.initial)
+                self.write_to_disk()
+            elif self.default is not NOTSET:
+                # default value
+                self._content = self.raw_from_native_object(self.default)
+            else:
+                self._content = NOTSET
+        else:
+            # read the content from disk
+            self.read_from_disk()
+        # re-format the content
+        if self._content is not NOTSET:
+            self._content = self.raw_from_native_object(self.to_native_object())
+
+    @property
+    def file_exists(self) -> bool:
+        return os.path.exists(self.file_path)
         
     def read_from_disk(self):
         if not self.persist:
             return
+        # file does not exist and a default value is given, we do not read from disk
+        if self.default is not NOTSET and not os.path.exists(self.file_path):
+            return
+        # read from disk
         with open(self.file_path, "rb") as fin:
             self._content = fin.read()
 
     def write_to_disk(self):
         if not self.persist:
             return
+        if self._content is NOTSET:
+            raise ValueError("Cannot write to file. Content is not set")
+        # write to disk
         with open(self.file_path, "wb") as fout:
             fout.write(self._content)
 
     def set_content_quietly(self, content: object):
         self._content = self.raw_from_native_object(content)
-        self.write_to_disk()
+        # write to disk only if needed
+        if self.default is NOTSET or self.raw_from_native_object(self.default) != self._content:
+            self.write_to_disk()
 
     @abstractmethod
     def to_native_object(self) -> object:
@@ -108,10 +130,13 @@ class GenericFileAdapter:
         pass
 
     async def on_update(self, rd: RawData):
+        if not self._initialized:
+            self._initialized = True
+            return
         # update the content
         new_content: bytes = self.raw_from_native_object(rd.get_as_native_object())
         # check if the content has changed
-        if new_content == self._content:
+        if new_content == self._content and self.file_exists:
             return
         # update the content
         self._content = new_content
@@ -121,7 +146,8 @@ class GenericFileAdapter:
     async def init(self, cxt: DTPSContext):
         self._context = await cxt.navigate(self.object_path).queue_create(topic_properties=self.properties)
         # publish the initial value
-        await self._context.publish(RawData.cbor_from_native_object(self.to_native_object()))
+        if self._content is not NOTSET:
+            await self._context.publish(RawData.cbor_from_native_object(self.to_native_object()))
         # subscribe for updates
         if self.properties is FullRW or self.properties.pushable:
             self._subscriber = await self._context.subscribe(self.on_update)
@@ -134,9 +160,6 @@ class GenericFileAdapter:
         await self._context.remove()
         if self.persist:
             os.remove(self.file_path)
-
-    def to_rawdata(self) -> RawData:
-        return RawData.json_from_native_object(self.to_native_object())
 
     def __str__(self):
         json_str = json.dumps(dataclasses.asdict(self), sort_keys=True)
@@ -172,8 +195,10 @@ class PlainFileAdapter(GenericFileAdapter):
     def raw_from_native_object(self, obj: str) -> bytes:
         return obj.encode("utf-8")
 
-    def to_rawdata(self) -> RawData:
-        return RawData.simple_string(self.to_native_object())
+
+def read_yaml_file(fpath: str) -> object:
+    with open(fpath, "r") as fin:
+        return yaml.safe_load(fin)
 
 
 ADAPTED_FILES_DIR = "/data/config"
@@ -197,6 +222,14 @@ ADAPTED_FILES = {
         properties=FullRW,
         kind=YAMLFileAdapter,
         droppable=True,
+        default={
+            f"{ADAPTED_FILES_DIR}/calibrations/camera_intrinsic/{ROBOT_NAME}.yaml":
+                read_yaml_file(f"{ADAPTED_FILES_DIR}/calibrations/camera_intrinsic/default.yaml"),
+            f"{ADAPTED_FILES_DIR}/calibrations/camera_extrinsic/{ROBOT_NAME}.yaml":
+                read_yaml_file(f"{ADAPTED_FILES_DIR}/calibrations/camera_extrinsic/default.yaml"),
+            f"{ADAPTED_FILES_DIR}/calibrations/kinematics/{ROBOT_NAME}.yaml":
+                read_yaml_file(f"{ADAPTED_FILES_DIR}/calibrations/kinematics/default.yaml"),
+        },
     ),
 
     f"{ADAPTED_FILES_DIR}/calibrations/(?P<key>.*)/default.yaml": FileAdapterTemplate(
@@ -231,18 +264,20 @@ class KVStore:
         self._adapters: Dict[ObjectPath, GenericFileAdapter] = {}
         # all files
         files = [os.path.join(dp, f) for dp, dn, fn in os.walk(ADAPTED_FILES_DIR) for f in fn]
-        matched: Set[str] = set()
+        files_matched: Set[str] = set()
+        regex_matched: Set[str] = set()
         # process regexed files
         for regex, adapter_template in ADAPTED_FILES.items():
             AdapterClass: Type[GenericFileAdapter] = adapter_template.kind
             pattern = re.compile(f"^{regex}$")
             # find all files matching the pattern
             for file in files:
-                if file in matched:
+                if file in files_matched:
                     continue
                 match = pattern.match(file)
                 if not match:
                     continue
+                regex_matched.add(regex)
                 groups: Dict[str, str] = match.groupdict()
                 # apply groups to the object path
                 object_path = adapter_template.object_path.format(**groups)
@@ -256,7 +291,33 @@ class KVStore:
                     persist=True,
                 )
                 self._adapters[object_path] = adapter
-                matched.add(file)
+                files_matched.add(file)
+
+            # process files with default value
+            if adapter_template.default is NOTSET:
+                continue
+            # get defaults
+            for default_fpath, default_value in adapter_template.default.items():
+                if default_fpath in files_matched:
+                    continue
+                match = pattern.match(default_fpath)
+                if not match:
+                    raise ValueError(f"Default file path '{default_fpath}' does not match the regex '{regex}'")
+                groups: Dict[str, str] = match.groupdict()
+                # apply groups to the object path
+                object_path = adapter_template.object_path.format(**groups)
+                # create a new adapter
+                # noinspection PyArgumentList
+                adapter = AdapterClass(
+                    file_path=default_fpath,
+                    object_path=object_path,
+                    properties=adapter_template.properties,
+                    droppable=adapter_template.droppable,
+                    persist=True,
+                    create=True,
+                    default=default_value,
+                )
+                self._adapters[object_path] = adapter
 
     async def define(self, rd: RawData):
         # decode request
@@ -267,6 +328,7 @@ class KVStore:
 
         key: str = data["key"].strip("/")
         value: Union[dict, list, str, int, float, bool, bytes] = data["value"]
+        default: Union[dict, list, str, int, float, bool, bytes, object] = data.get("default", NOTSET)
         persist: bool = data.get("persist", False)
 
         if ".." in key:
@@ -287,6 +349,7 @@ class KVStore:
                 create=True,
                 persist=persist,
                 initial=value,
+                default=default,
                 droppable=True,
             )
             adapter.set_content_quietly(value)
@@ -350,7 +413,8 @@ class KVStore:
                 app_data = meta.get("topics", {}).get("", {}).get("app_data", {})
                 # args
                 persist: bool = app_data.get("kvstore.persist", False)
-                value: Any = app_data.get("kvstore.initial", None)
+                value: Any = app_data.get("kvstore.initial", NOTSET)
+                default: Any = app_data.get("kvstore.default", NOTSET)
                 # create adapter
                 adapter = YAMLFileAdapter(
                     file_path=fpath,
@@ -360,6 +424,7 @@ class KVStore:
                     droppable=True,
                     persist=persist,
                     initial=value,
+                    default=default,
                 )
                 adapter.set_content_quietly(value)
                 self._adapters[object_path] = adapter
