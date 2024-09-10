@@ -7,6 +7,7 @@ import re
 from abc import abstractmethod
 from typing import Optional, Dict, Type, Union, Set, List, cast, Any
 
+import cbor2
 import yaml
 
 from dt_cli_utils import install_colored_logs
@@ -411,10 +412,14 @@ class KVStore:
                     continue
                 # get metadata
                 meta = cast(dict, rd.get_as_native_object())
-                app_data = meta.get("topics", {}).get("", {}).get("app_data", {})
-                # args
+                app_data_bin: dict = meta.get("topics", {}).get("", {}).get("app_data", {})
+                app_data: dict = {k: cbor2.loads(v) for k, v in app_data_bin.items()}
+                # arg: persist
                 persist: bool = app_data.get("kvstore.persist", False)
+                persist = persist if isinstance(persist, bool) else False
+                # arg: initial
                 value: Any = app_data.get("kvstore.initial", NOTSET)
+                # arg: default
                 default: Any = app_data.get("kvstore.default", NOTSET)
                 # create adapter
                 adapter = YAMLFileAdapter(
