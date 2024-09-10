@@ -74,7 +74,8 @@ class GenericFileAdapter:
             if not self.create:
                 raise FileNotFoundError(f"File not found: {self.file_path}")
             # create the directory
-            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+            if self.persist:
+                os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
             # create the file only if we have initial data
             if self.initial is not NOTSET:
                 # create the file
