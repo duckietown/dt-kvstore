@@ -7,7 +7,6 @@ import re
 from abc import abstractmethod
 from typing import Optional, Dict, Type, Union, Set, List, cast, Any
 
-import cbor2
 import yaml
 
 from dt_cli_utils import install_colored_logs
@@ -75,8 +74,7 @@ class GenericFileAdapter:
             if not self.create:
                 raise FileNotFoundError(f"File not found: {self.file_path}")
             # create the directory
-            if self.persist:
-                os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
             # create the file only if we have initial data
             if self.initial is not NOTSET:
                 # create the file
@@ -90,6 +88,10 @@ class GenericFileAdapter:
         else:
             # read the content from disk
             self.read_from_disk()
+            # Immediately strip trailing newlines and spaces:
+            #   (Note: this changes self._content from raw bytes to a trimmed‐str, then back to bytes.)
+            trimmed = self._content.decode("utf-8").strip(" \n\r\t")
+            self._content = trimmed.encode("utf-8")
         # re-format the content
         if self._content is not NOTSET:
             self._content = self.raw_from_native_object(self.to_native_object())
@@ -412,14 +414,10 @@ class KVStore:
                     continue
                 # get metadata
                 meta = cast(dict, rd.get_as_native_object())
-                app_data_bin: dict = meta.get("topics", {}).get("", {}).get("app_data", {})
-                app_data: dict = {k: cbor2.loads(v) for k, v in app_data_bin.items()}
-                # arg: persist
+                app_data = meta.get("topics", {}).get("", {}).get("app_data", {})
+                # args
                 persist: bool = app_data.get("kvstore.persist", False)
-                persist = persist if isinstance(persist, bool) else False
-                # arg: initial
                 value: Any = app_data.get("kvstore.initial", NOTSET)
-                # arg: default
                 default: Any = app_data.get("kvstore.default", NOTSET)
                 # create adapter
                 adapter = YAMLFileAdapter(
