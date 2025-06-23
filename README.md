@@ -1,6 +1,6 @@
 # KVStore Node
 
-This node implements a **file-based key–value store** backed by DTPS (Duckietown Publish/Subscribe). It watches a directory on disk (`/data/config`), automatically creates adapters for any matching files (generic/plain, YAML, or JSON), and exposes corresponding DTPS topics so that other components can read or update those files at runtime. In addition, it provides two RPC endpoints:
+This node implements a **file-based key–value store** backed by DTPS (Duckietown Postal Service). It watches a directory on disk (`/data/config`), automatically creates adapters for any matching files (generic/plain, YAML, or JSON), and exposes corresponding DTPS topics so that other components can read or update those files at runtime. In addition, it provides two RPC endpoints:
 
 * **`define`**: create or update a file at a given key with a given value (YAML format by default).
 * **`drop`**: remove a file (and its associated DTPS topic).
@@ -144,7 +144,7 @@ Below are the patterns (in insertion order). Note that the code always tries the
 
      ```
      /data/config/calibrations/camera_intrinsic/duckiebot1.yaml
-     → if missing, the node copies in the “default.yaml” for camera_intrinsic, then  
+     → if missing, the node copies in the “default.yaml” for camera_intrinsic, then
        publishes that as “data/calibration/camera_intrinsic/current”
      ```
 
